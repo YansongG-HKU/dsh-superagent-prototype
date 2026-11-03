@@ -205,7 +205,9 @@ function runtime(config) {
 
 function run(command, args, { cwd, env, quiet = false, stdio } = {}) {
   if (!quiet) console.log(`$ ${[command, ...args].map(part => /\s/.test(part) ? JSON.stringify(part) : part).join(' ')}`)
-  return execFileSync(command, args, { cwd, env: { ...cleanEnv(), ...env }, encoding: 'utf8',
+  // Console programs (`git`, `gh`, `node`) must not flash a console window when the tool runs from the panel,
+  // whose host is the GUI DeepSeek Harness process.
+  return execFileSync(command, args, { cwd, env: { ...cleanEnv(), ...env }, encoding: 'utf8', windowsHide: true,
     stdio: stdio ?? ['ignore', 'pipe', 'pipe'] })
 }
 
@@ -243,7 +245,7 @@ function portFree(port) {
 function sleep(ms) { return new Promise(resolveSleep => setTimeout(resolveSleep, ms)) }
 
 function ghToken(ghCli, login) {
-  const base = { encoding: 'utf8', env: cleanEnv() }
+  const base = { encoding: 'utf8', env: cleanEnv(), windowsHide: true }
   try {
     const output = execFileSync(ghCli, ['auth', 'token', '--user', login], { ...base, stdio: ['ignore', 'pipe', 'ignore'] }).trim()
     if (output) return output
@@ -371,10 +373,10 @@ async function commandDoctor(options) {
     else check(await portFree(instance.port), `${instance.name}: port ${instance.port} is free`)
     check(instance.repository.includes('/'), `${instance.name}: repository ${instance.repository}`)
     try {
-      const login = execFileSync(config.defaults.agentCli, ['api', 'user', '--jq', '.login'], { encoding: 'utf8',
+      const login = execFileSync(config.defaults.agentCli, ['api', 'user', '--jq', '.login'], { encoding: 'utf8', windowsHide: true,
         env: { ...cleanEnv(), GH_CONFIG_DIR: join(instance.stateDir, 'gh-agent') } }).trim()
       check(login === instance.agentLogin, `${instance.name}: gh config acts as ${login}`)
-      const push = execFileSync(config.defaults.agentCli, ['api', `repos/${instance.repository}`, '--jq', '.permissions.push'], { encoding: 'utf8',
+      const push = execFileSync(config.defaults.agentCli, ['api', `repos/${instance.repository}`, '--jq', '.permissions.push'], { encoding: 'utf8', windowsHide: true,
         env: { ...cleanEnv(), GH_CONFIG_DIR: join(instance.stateDir, 'gh-agent') } }).trim()
       check(push === 'true', `${instance.name}: agent has push access to ${instance.repository}`)
     } catch (error) {
@@ -413,7 +415,7 @@ async function ensureHostEntry(stateDir, agentLogin, agentCli) {
   const file = join(dir, 'hosts.yml')
   await writeFile(file, content)
   if (process.platform === 'win32') {
-    try { execFileSync('icacls', [file, '/inheritance:r', '/grant:r', `${process.env.USERNAME}:(R,W)`], { stdio: 'ignore' }) } catch { /* non-NTFS */ }
+    try { execFileSync('icacls', [file, '/inheritance:r', '/grant:r', `${process.env.USERNAME}:(R,W)`], { stdio: 'ignore', windowsHide: true }) } catch { /* non-NTFS */ }
   }
   return file
 }
@@ -521,7 +523,7 @@ async function commandStop(options) {
     const state = await readJson(statePath)
     if (!state || !isAlive(state.pid)) { console.log(`${instance.name}: not running`); await rm(statePath, { force: true }); continue }
     if (process.platform === 'win32') {
-      try { execFileSync('taskkill', ['/PID', String(state.pid), '/T', '/F'], { stdio: 'ignore' }) } catch { /* gone */ }
+      try { execFileSync('taskkill', ['/PID', String(state.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }) } catch { /* gone */ }
     } else {
       try { process.kill(-state.pid, 'SIGTERM') } catch { try { process.kill(state.pid, 'SIGTERM') } catch { /* gone */ } }
       for (let attempt = 0; attempt < 60 && isAlive(state.pid); attempt++) await sleep(500)

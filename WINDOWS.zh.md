@@ -183,6 +183,9 @@ Windows 上的后台启停不是 Windows 服务：机器重启后需要再执行
   请在 Source 设置里打开 **接收仓库里的新 Issue / 评论**（降级路径）。能收到通知的账号可用
   `gh auth refresh -h github.com -s notifications` 补上 scope。
 - Windows 上目前可靠的触发是**新 Issue 和新评论**；编辑旧 Issue 正文不会通知任何一条路径。
+- 控制台窗口：`gh`、`git`、集群工具都是控制台程序，从桌面版（GUI 进程）调用时每个命令都会新开一个
+  控制台窗口，Source 轮询时就会不停闪窗。插件对每一次 CLI 调用都传了 `windowsHide`，集群工具同样处理；
+  你自己终端里的命令、或 DSH 本身执行 shell 时，窗口仍属于各自的程序。
 - 未移植 Feishu（需要 `lark-cli`，上游面向 POSIX）。
 - 不做自动合并：PR 由人合并（上游默认；示例 Delivery requirements 删掉了自动合并段落）。
 - 状态目录里有明文 `gh-agent\hosts.yml`（agent token，ACL 限制为当前用户）。把它当凭据对待，怀疑泄露时轮换。

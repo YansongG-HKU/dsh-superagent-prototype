@@ -223,6 +223,10 @@ dedicated profile/process instead (upstream's recommended layout; `tools/dev-pro
   that do receive notifications.
 - New Issues and new comments are the reliable triggers on Windows today; editing an old Issue body does not
   notify either path.
+- Console windows: `gh`, `git` and the cluster tool are console programs, so on Windows every call made from
+  the desktop app (a GUI process) would open its own console window and the Source's polling would flash
+  windows. The plugin passes `windowsHide` for every CLI call it makes and the cluster tool does the same;
+  other programs that run (a person's terminal, or DSH's own shell tools) keep their own console windows.
 - Feishu is not ported (needs `lark-cli`, and is POSIX-oriented upstream).
 - No auto-merge: pull requests are merged by a person (upstream default; the sample Delivery requirements remove
   the auto-merge paragraph).
