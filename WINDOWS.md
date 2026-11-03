@@ -1,0 +1,173 @@
+# Windows port
+
+This fork makes the [dsh-superagent research prototype](https://github.com/deepseek-ai/dsh-superagent-prototype)
+run on **Windows**, including **inside the DeepSeek Harness Desktop app** as an ordinary profile plugin.
+
+Upstream is POSIX-first research code: its setup writes `#!/bin/sh` command shims, binds `gh` through a wrapper
+script, runs the ticket prepare command with `sh`, and its service script needs `tmux`. None of that exists on
+Windows. This fork keeps the upstream design and adds platform branches where the host touches the operating
+system, plus a small set of fixes the desktop deployment needed.
+
+> Research prototype, not an official DeepSeek product. MIT licensed; derived from upstream (see [LICENSE](LICENSE)).
+
+## What works on Windows
+
+Verified end to end on Windows 11 with Node 24 and DSH `0.2.1-rc.5` (Aug 2026 state of this fork):
+
+- GitHub Issue/PR comments that mention the agent become tickets, assessed by the main Session.
+- Each ticket gets its own worker Session, `git worktree` directory, branch, commits, pull request and delivery
+  comments on the original conversation.
+- Follow-up comments wake the worker; a human merge ends the ticket as `merged`; a person's stop ends it as
+  `stopped`; a failed assignment can be retried.
+- Pause/resume, plugin disable/enable, and full panel UI (overview, sources, triggers, evals, execution,
+  settings, prompts, ticket/thread pages, search) work.
+
+## Changes against upstream
+
+Host-side (all with POSIX branches preserved):
+
+- `src/deployment.ts`
+  - `stateDir` accepts Windows drive-absolute (`C:\…`, `C:/…`) and UNC paths.
+  - `executable()` resolves bare command names over `PATH` with `PATHEXT` (`.exe .cmd .bat .com`).
+  - Setup probes run without the POSIX `env` command: Windows passes the probe environment through the
+    subprocess spawn instead, **including `GH_CONFIG_DIR`**. Without it, setup would validate the operator's
+    own signed-in account instead of the agent's, silently resolving the wrong identity.
+  - Feishu probes become platform-safe the same way.
+- `src/infra/environment.ts`
+  - On Windows the agent identity comes from `GH_CONFIG_DIR` pointing at an isolated `gh` configuration
+    directory (`<stateDir>\gh-agent`), not from a wrapper shim, so no `gh`/`lark-cli` shims are written.
+  - Blocked commands are written as `<name>.cmd` shims (`@echo off` + marker + failure message + `exit /b 1`),
+    keeping the marker-based ownership check, foreign-file refusal, atomic rename, and stale POSIX shim cleanup.
+  - `worker-gitconfig` writes the credential helper as `!"C:/…/gh.exe" auth git-credential`, the form Git for
+    Windows' bundled `sh` executes; `verifyEnvironment()` normalizes Windows config origins (separators, drive
+    case) when validating it.
+  - `agentVariables()` adds `GH_CONFIG_DIR` on Windows.
+- `src/executor/dsh.ts` — the ticket prepare command runs as
+  `pwsh -NoProfile -NonInteractive -Command <command>` on Windows (`sh -c` on POSIX); author prepare commands in
+  PowerShell.
+- `src/app/sessions.ts` — the main Session's tool allow-list names `pwsh` instead of `bash` on Windows and is
+  filtered against the tools the composition actually registers (DSH refuses unknown names, which broke Session
+  resume); the no-wait guard also covers `pwsh`.
+- `src/sources/github.ts` — when the token cannot use the notifications API (missing `notifications` OAuth
+  scope), the Source degrades to the repository event streams (`observeIssues`/`observeComments`) and reports
+  the limitation in its health detail instead of failing every poll. Enable `observeIssues`/`observeComments`
+  in the Source settings when the token has no `notifications` scope, or when the GitHub account itself
+  receives no notifications (new/unverified accounts often do not).
+
+Tests: Windows-specific cases added; inherently POSIX-only specs are skipped on `win32` (`skipIf`) while their
+coverage stays intact on POSIX. `pnpm check` (typecheck + tests + build) passes on Windows:
+1173 passed, 33 skipped, 0 failed.
+
+## Requirements
+
+- Windows 10/11, Node.js 22.19+ or 24+, pnpm 10/11, git 2.32+ (Git for Windows), GitHub CLI 2.48+.
+- A DeepSeek Harness version in `engines.dsh` (`^0.2.1-alpha.2`); verified with the DSH Desktop runtime
+  `0.2.1-rc.5`.
+- One GitHub repository on github.com, an agent GitHub account with push access, and `gh` signed in to that
+  account (keep the operator's own login separate).
+- Optional Feishu: still POSIX-oriented (`lark-cli`); untested on Windows.
+
+## Install (DSH Desktop app)
+
+1. Clone this fork somewhere local and build it:
+
+   ```powershell
+   git clone https://github.com/<you>/dsh-superagent-windows.git
+   cd dsh-superagent-windows
+   pnpm install
+   pnpm build
+   ```
+
+2. Prepare the agent's isolated `gh` configuration (one time; run as the operator, with the agent already
+   signed in to `gh`):
+
+   ```powershell
+   ./tools/setup-agent-gh.ps1 -AgentUser <agent-login> -StateDir "$env:USERPROFILE\.dsh\state\superagent"
+   ```
+
+3. Add the machine configuration (`stateDir`) to the DSH profile that will host the plugin. `tools/install.ps1`
+   writes/merges it for you:
+
+   ```powershell
+   ./tools/install.ps1 -Profile desktop -StateDir "$env:USERPROFILE\.dsh\state\superagent"
+   ```
+
+4. Install the bundle into that profile. For the Electron-managed `desktop` profile, ask the DSH agent (the
+   `plugin_manager` tool) to install the bundle from this checkout:
+
+   > Install the bundle at `<absolute path to this checkout>` into the current profile, then show the
+   > Superagent page.
+
+   For a custom, non-desktop profile you can instead run (with `dsh` on `PATH`):
+
+   ```powershell
+   dsh plugin --profile <profile> add "link:<absolute path to this checkout>"
+   ```
+
+5. Give the agent its GitHub identity and workload through the Superagent panel (or
+   `tools/configure.mjs`, which calls the same management API): the repository, the agent `gh` CLI path, the
+   Policy allow-list, the execution root and a PowerShell prepare command, and the Delivery requirements
+   prompt section.
+
+Starting from scratch: the panel's **Sources** card wants `owner/name` plus the absolute `gh.exe` path; the
+**Policy** card wants the GitHub logins that may ask for work; the **Execution** card wants a prepare command
+such as:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$repo = '<absolute path to a local clone of the repository>'
+$ref = if ($env:DSH_SUPERAGENT_GITHUB_PR_HEAD) { $env:DSH_SUPERAGENT_GITHUB_PR_HEAD } else { 'HEAD' }
+$remote = "https://github.com/$env:DSH_SUPERAGENT_GITHUB_REPOSITORY.git"
+git -C $repo fetch --no-tags $remote "${ref}:refs/dsh-superagent/$env:DSH_SUPERAGENT_TICKET"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+git -C $repo worktree add -b "agent/$env:DSH_SUPERAGENT_NAME" "$env:DSH_SUPERAGENT_DIR" "refs/dsh-superagent/$env:DSH_SUPERAGENT_TICKET"
+exit $LASTEXITCODE
+```
+
+`tools/` also contains `configure.mjs` (idempotent settings writes through the management API),
+`status.ps1` (health/setup/ticket overview) and `smoke-test.mjs` (end-to-end: open an issue, watch the flow,
+report the PR).
+
+## How it behaves inside the DSH Desktop app
+
+The plugin runs inside the desktop app's Node process, exactly like any other profile plugin. The prototype's
+design assumes a dedicated DSH profile because it **mutates process environment** so worker shells act as the
+agent: `GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL` (an isolated `worker-gitconfig` with no commit identity and the
+agent's credential helper), `PATH` (worker shims) and credential-shaped tombstones. Inside the desktop app those
+variables are process-wide, so **every session of that DSH process** sees them while the plugin is active:
+
+- `gh` in any DSH session acts as the agent account; `git` uses the agent's credential helper and refuses to
+  commit without an explicit identity.
+
+Use a normal terminal for personal `git`/`gh` work, disable the plugin when you do not need it, or deploy it in a
+dedicated profile/process instead (upstream's recommended layout; `tools/dev-profile.ps1` starts one on
+`127.0.0.1:3082`). The environment is restored when the plugin is disabled.
+
+## Known limitations
+
+- The agent's GitHub account must be able to receive mentions. If its `gh` token lacks the `notifications`
+  scope, or the account itself gets no notifications, enable **Receive Issues/Comments** in the Source settings
+  that the degraded path uses. `gh auth refresh -h github.com -s notifications` adds the scope for accounts
+  that do receive notifications.
+- New Issues and new comments are the reliable triggers on Windows today; editing an old Issue body does not
+  notify either path.
+- Feishu is not ported (needs `lark-cli`, and is POSIX-oriented upstream).
+- No auto-merge: pull requests are merged by a person (upstream default; the sample Delivery requirements remove
+  the auto-merge paragraph).
+- The state directory contains a plaintext `gh-agent\hosts.yml` (the agent token, ACL-restricted to the current
+  user). Treat it as a credential and rotate it if it may have leaked.
+- The worker runs as your Windows user without approval. The shims and git configuration are defaults, not a
+  security boundary; use a dedicated OS account for real isolation.
+
+## Verification
+
+`tools/` plus the panel were exercised against a private playground repository: full issue→ticket→worker→PR→
+delivery flow twice, a follow-up comment waking the worker and pushing a new commit, human merge ending two
+tickets as `merged`, pause/resume, a deliberate stop ending a ticket as `stopped` without a PR, failure/retry,
+and plugin disable/enable with environment restore and no duplicate work. CI (`.github/workflows/ci.yml`) runs
+typecheck, tests and build on `ubuntu-latest` and `windows-latest`.
+
+## License
+
+MIT, same as upstream. See [LICENSE](LICENSE). Upstream copyright notice retained; modifications in this fork
+are published under the same license.
