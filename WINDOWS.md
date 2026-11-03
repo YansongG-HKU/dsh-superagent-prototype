@@ -9,6 +9,7 @@ Windows. This fork keeps the upstream design and adds platform branches where th
 system, plus a small set of fixes the desktop deployment needed.
 
 > Research prototype, not an official DeepSeek product. MIT licensed; derived from upstream (see [LICENSE](LICENSE)).
+> 中文版：[WINDOWS.zh.md](WINDOWS.zh.md)（安装、多仓库 cluster 模式、限制）。
 
 ## What works on Windows
 
