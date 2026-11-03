@@ -4,6 +4,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
 import { THREAD_FILTERS, TICKET_FILTERS, type Api, type ApiResponse, type RouteParams } from './api.ts'
+import type { ClusterAdmin } from './cluster.ts'
 import { sourceSkills } from './context.ts'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { PromptConflict, SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInParts, defaultPrompts, savePrompts, type Prompts }
@@ -47,6 +48,8 @@ export interface HttpHost {
   readonly deployment: Deployment
   readonly setupProblem?: SetupProblem | undefined
   readonly feishuProblem?: SetupProblem | undefined
+  /** Multi-repository cluster administration behind the panel's cluster page. */
+  readonly cluster: Pick<ClusterAdmin, 'view' | 'provision' | 'start' | 'stop'>
   configured(): boolean
   links(): LinkTarget
   ticketEnvironment(ticket: Ticket): Variable[]
@@ -210,6 +213,14 @@ function routes(runtime: HttpHost): Routes {
       return savePrompts(runtime, request.config, request.baseRevision, 'panel')
     },
     'POST prompts/preview': async input => runtime.prompts.preview(await promptBody(input)),
+    // Multi-repository cluster: read the fleet and run tools/cluster.mjs for add/start/stop.
+    'GET cluster': () => runtime.cluster.view(),
+    'POST cluster/instances': async ({ body }) => {
+      const request = z.object({ repository: z.string(), name: z.string().optional() }).parse(await body())
+      return { operation: await runtime.cluster.provision(request) }
+    },
+    'POST cluster/instances/:name/start': async ({ params }) => ({ operation: await runtime.cluster.start(params.name) }),
+    'POST cluster/instances/:name/stop': async ({ params }) => ({ operation: await runtime.cluster.stop(params.name) }),
   }
 }
 function decoded(segment: string): string {

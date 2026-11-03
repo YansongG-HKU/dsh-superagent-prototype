@@ -6,10 +6,12 @@
 > host environment, `gh` identity isolation, git credential helper, PowerShell ticket preparation, Session presets,
 > tests and an optional in-app deployment are adapted. It also ships **cluster mode** for watching **several
 > repositories**: one isolated instance per repository from a declarative config (`tools/cluster.mjs`, see
-> [WINDOWS.md](WINDOWS.md#multiple-repositories-cluster-mode)). Start at [WINDOWS.md](WINDOWS.md) for the Windows
+> [WINDOWS.md](WINDOWS.md#multiple-repositories-cluster-mode)), managed from the Superagent panel's
+> **Repositories (cluster)** page as well: list the instances, add a repository, start and stop them.
+> Start at [WINDOWS.md](WINDOWS.md) for the Windows
 > installation, the exact upstream changes and the known limitations; `tools/` contains the installer and
 > configuration helpers. Everything below is the upstream documentation and still applies.
-> 中文说明（安装、多仓库 cluster 模式、限制）：[WINDOWS.zh.md](WINDOWS.zh.md)。
+> 中文说明（安装、多仓库 cluster 模式与面板集群页、限制）：[WINDOWS.zh.md](WINDOWS.zh.md)。
 
 > **Research prototype for reference only, not an official DeepSeek product.** This code grew out of our team's day-to-day development work, with much of the engineering done by coding agents. Treat it as research code, not production-ready software. It may still contain bugs, and its coding style and engineering practices may be inconsistent. Review and adapt it before using it in your own environment.
 >

@@ -57,7 +57,7 @@ Host-side (all with POSIX branches preserved):
 
 Tests: Windows-specific cases added; inherently POSIX-only specs are skipped on `win32` (`skipIf`) while their
 coverage stays intact on POSIX. `pnpm check` (typecheck + tests + build) passes on Windows:
-1173 passed, 33 skipped, 0 failed.
+1191 passed, 33 skipped, 0 failed (cluster mode and its panel page included).
 
 ## Requirements
 
@@ -147,6 +147,24 @@ Each instance is a normal dsh-superagent deployment with its own:
   each instance keeps its own identity boundary,
 - panel, Policy allow-list and prompts; the agent shows what each repository needs like a separate teammate.
 
+### From the panel
+
+The Superagent panel has a **Repositories (cluster)** tab that reads the same cluster file and runs the same
+tool, so the fleet is usable without a terminal:
+
+- it lists every instance with its repository, port, Executor load, waiting Tickets, setup/health state and a
+  link that opens that instance's own panel;
+- **Start** and **Stop** run `cluster.mjs start --name …` / `stop --name …` for that instance;
+- **Add repository** runs `cluster.mjs add --repo … --provision`: it creates the profile, installs the bundle,
+  writes the isolated `gh` configuration, clones the repository, starts the process and writes the settings
+  (about a minute). Adding a repository that already exists repairs that instance instead (retrying a clone or
+  configuration that failed halfway), and the section below the form shows each operation's progress and output;
+- instances started by the panel are normal detached processes: stopping DSH or the desktop app does not stop
+  them, `stop` does, and after a reboot run `cluster.mjs start` (or the panel's Start for each row).
+
+The page needs the plugin installed from its source checkout (it runs `tools/cluster.mjs` from there) and the
+cluster file at `~/.dsh/superagent-cluster.json` (override with `DSH_SUPERAGENT_CLUSTER_CONFIG`).
+
 Quick start (Windows; a plain terminal, not a DSH Session, so no inherited worker environment):
 
 ```powershell
@@ -154,13 +172,13 @@ cd <this checkout>
 node tools/cluster.mjs init --bundle <this checkout> --dsh-bin <dsh>/lib/bin.js --node <node.exe> `
   --pnpm <pnpm.mjs> --agent-login <agent> --operator-login <you> --agent-cli <gh.exe> `
   --state-root <dir> --clone-root <dir> --external desktop=http://127.0.0.1:54746
-node tools/cluster.mjs add --repo owner/first-repo
-node tools/cluster.mjs add --repo owner/second-repo
-node tools/cluster.mjs setup
-node tools/cluster.mjs start
-node tools/cluster.mjs configure
+node tools/cluster.mjs add --repo owner/first-repo --provision
+node tools/cluster.mjs add --repo owner/second-repo --provision
 node tools/cluster.mjs status
 ```
+
+`add --provision` is the one-command form of add + setup + start + configure; `provision --name <instance>`
+does the same for an existing instance that needs repair.
 
 - `setup` creates each profile from the Web template, renders `tools/profile-template.yml` (port, state
   directory and model route), installs this bundle with `dsh plugin add link:<checkout>`, writes the agent's

@@ -125,7 +125,7 @@ function parseArgs(argv) {
     const token = rest[index]
     if (!token.startsWith('--')) throw new Error(`unexpected argument: ${token}`)
     const name = token.slice(2)
-    if (name === 'help' || name === 'json' || name === 'force') { options[name] = true; continue }
+    if (name === 'help' || name === 'json' || name === 'force' || name === 'provision') { options[name] = true; continue }
     const value = rest[index + 1]
     if (value === undefined || value.startsWith('--')) throw new Error(`--${name} needs a value`)
     options[name] = value
@@ -327,6 +327,15 @@ async function commandAdd(options) {
   config.instances.push(instance)
   await saveConfig(configFile, config)
   console.log(`added instance ${name}: ${repository} -> http://127.0.0.1:${port} (state ${stateDir})`)
+  if (options.provision) {
+    // Bring the new repository all the way up: profile, bundle, gh configuration, clone, process and settings.
+    await commandSetup({ ...options, name })
+    await commandStart({ ...options, name })
+    await commandConfigure({ ...options, name })
+    const state = await readJson(stateFile(configFile, name))
+    console.log(`\n${name} is provisioned; open ${state?.url ?? `http://127.0.0.1:${port}`}`)
+    return
+  }
   console.log('next: node tools/cluster.mjs setup --name ' + name)
 }
 
@@ -579,8 +588,19 @@ async function commandConfigure(options) {
     const args = [scripts, '--url', origin, '--repo', instance.repository, '--cli', instance.agentCli,
       '--agent-login', instance.agentLogin, '--operator-login', config.defaults.operatorLogin, '--clone', instance.clone]
     if (instance.prepare) args.push('--prepare', instance.prepare)
-    run(runtime(config).node, args, { stdio: 'inherit' })
+    // Pipe configure.mjs so a caller (for example the panel's cluster operations) captures its progress too,
+    // and print it for terminal users.
+    const output = run(runtime(config).node, args, { stdio: ['ignore', 'pipe', 'pipe'], quiet: true })
+    if (output && output.trim()) console.log(output.trim())
   }
+}
+
+async function commandProvision(options) {
+  // Idempotent: setup re-renders the profile, retries a missing clone and gh configuration, start launches a stopped
+  // instance, and configure rewrites its settings. It repairs an add that stopped halfway (for example on a network error).
+  await commandSetup(options)
+  await commandStart(options)
+  await commandConfigure(options)
 }
 
 async function buildBundle(config) {
@@ -629,7 +649,7 @@ commands:
   add         add a repository instance
               --repo owner/name [--name <name>] [--profile <profile>] [--port <port>]
               [--state-dir <dir>] [--clone <dir>] [--agent-login <login>] [--agent-cli <gh.exe>]
-              [--prepare-file <ps1>]
+              [--prepare-file <ps1>] [--provision (also setup, start and configure it)]
   list        list instances and external entries
   doctor      preflight: paths, built bundle, gh identity and push access, free ports
   setup       create profiles, render the profile patch, install the bundle, write gh config, clone
@@ -639,6 +659,7 @@ commands:
   status      print setup, health and executor load per instance         [--json]
   configure   write Source/Policy/Executor/Prompts through each instance's management API
               [--name <instance>]
+  provision   bring existing instances all the way up: setup, start and configure  [--name <instance>]
   upgrade     rebuild the bundle and restart the running instances
   logs        tail an instance log  --name <instance> [--lines 80]
   help        this text
@@ -656,6 +677,7 @@ async function main() {
     case 'stop': return commandStop(options)
     case 'status': return commandStatus(options)
     case 'configure': return commandConfigure(options)
+    case 'provision': return commandProvision(options)
     case 'upgrade': return commandUpgrade(options)
     case 'logs': return commandLogs(options)
     case 'help': case '--help': case '-h': console.log(HELP); return

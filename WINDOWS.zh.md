@@ -46,8 +46,7 @@ Host 侧（POSIX 分支全部保留）：
   或 GitHub 账号本身收不到通知（新账号/未验证邮箱常见）时，请在 Source 设置里打开这两个开关。
 
 测试：新增 Windows 用例；纯 POSIX 用例在 `win32` 上 skip，POSIX 覆盖不变。`pnpm check`（typecheck + test + build）
-在 Windows 通过：1173 项通过、33 跳过、0 失败（v0.1）；v0.2 增加 cluster 相关后用当前套件为
-1181 通过 / 33 跳过 / 0 失败。
+在 Windows 通过：当前套件 1191 通过 / 33 跳过 / 0 失败（含 cluster 工具、面板集群页及其宿主 API）。
 
 ## 环境要求
 
@@ -123,6 +122,21 @@ exit $LASTEXITCODE
 - `gh` 配置目录（`<stateDir>\gh-agent`）——同一个 agent 账号可以服务多个仓库，但每个实例保持自己的身份边界；
 - 面板、Policy 允许名单和提示词；每个仓库像一个独立的同事，各自有自己的"待办"。
 
+### 在面板里管理
+
+Superagent 面板多了一个 **集群** 页，读同一份集群配置、调同一个工具，所以不用终端也能管多仓库：
+
+- 列出每个实例：仓库、端口、执行器负载、待处理工单、setup/健康状态，以及"打开面板"链接（直达该实例自己的面板）；
+- **启动 / 停止** 对该实例执行 `cluster.mjs start --name …` / `stop --name …`；
+- **添加仓库** 执行 `cluster.mjs add --repo … --provision`：建 profile、装插件、写隔离的 gh 配置、克隆仓库、
+  启动进程、写入设置（约一分钟）。重复添加一个已存在的仓库会改为"修复配置"（重试可能中断的克隆或配置），
+  表单下方的"最近操作"显示进度和输出；
+- 面板启动的实例是普通后台进程：关闭 DSH/桌面版不会停它们，只有"停止"会；机器重启后点各行的"启动"或跑一次
+  `cluster.mjs start`。
+
+这个页面需要插件以源码目录方式安装（它会从那里运行 `tools/cluster.mjs`），并且集群配置位于
+`~/.dsh/superagent-cluster.json`（可用 `DSH_SUPERAGENT_CLUSTER_CONFIG` 覆盖）。
+
 快速开始（Windows；请在**普通终端**而不是 DSH 会话里执行，避免继承 worker 环境）：
 
 ```powershell
@@ -130,13 +144,12 @@ cd <本仓库>
 node tools/cluster.mjs init --bundle <本仓库> --dsh-bin <dsh>/lib/bin.js --node <node.exe> `
   --pnpm <pnpm.mjs> --agent-login <agent> --operator-login <你> --agent-cli <gh.exe> `
   --state-root <目录> --clone-root <目录> --external desktop=http://127.0.0.1:54746
-node tools/cluster.mjs add --repo owner/first-repo
-node tools/cluster.mjs add --repo owner/second-repo
-node tools/cluster.mjs setup
-node tools/cluster.mjs start
-node tools/cluster.mjs configure
+node tools/cluster.mjs add --repo owner/first-repo --provision
+node tools/cluster.mjs add --repo owner/second-repo --provision
 node tools/cluster.mjs status
 ```
+
+`add --provision` 是 add + setup + start + configure 的一条命令形式；`provision --name <实例>` 用于修复已有实例。
 
 - `setup`：从 Web 模板创建各 profile、渲染 `tools/profile-template.yml`（端口、状态目录、模型路由）、
   用 `dsh plugin add link:<本仓库>` 安装本 bundle、写入 agent 的隔离 `gh` 配置、克隆仓库供工单建 worktree。

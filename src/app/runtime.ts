@@ -11,12 +11,14 @@ import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import { mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
 import { allowedSender, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
 import { Commands } from '../infra/commands.ts'
+import { packagePath } from '../infra/paths.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import { environmentOf, ticketEnvironment, type Variable } from './execution-environment.ts'
 import type { SetupProblem } from '../setup.ts'
@@ -30,6 +32,7 @@ import { TextCache } from './cache.ts'
 import { Effects } from './effects.ts'
 import { Prompts } from './prompts.ts'
 import { registerHttp, type HttpHost } from './http.ts'
+import { ClusterAdmin } from './cluster.ts'
 import type { LinkTarget } from './views/records.ts'
 import { candidateCard, repliedTo, sourceLink, type LinkHost } from './links.ts'
 import { eventNotice, followupNotice } from './notices.ts'
@@ -70,6 +73,8 @@ export class Runtime extends Service implements SourceHost {
   readonly outbox: Outbox
   readonly engine: Engine
   readonly passes: Passes
+  /** Multi-repository cluster administration behind the panel's cluster page. */
+  readonly cluster: ClusterAdmin
   readonly ready: Promise<void>
   private readonly board = new HealthBoard()
   private readonly runtimeHealth = this.board.claim('runtime', { state: 'starting', detail: '' })
@@ -87,6 +92,10 @@ export class Runtime extends Service implements SourceHost {
   constructor(ctx: Context, readonly machine: Machine, restart: () => void) {
     super(ctx, 'orchestrator')
     const runtime = this
+    // The cluster page reads tools/cluster.mjs's own configuration (DSH home by default) and runs that tool for its actions.
+    this.cluster = new ClusterAdmin({ toolPath: packagePath('tools', 'cluster.mjs'),
+      configPath: process.env.DSH_SUPERAGENT_CLUSTER_CONFIG
+        ?? join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'superagent-cluster.json') })
     // Lock the state directory before opening the database so another process cannot migrate or write concurrently.
     mkdirSync(machine.stateDir, { recursive: true, mode: 0o700 })
     const compromised = (error: Error) => { this.runtimeHealth.set({ state: 'error', detail: error.message }); this.stopped.abort() }
@@ -219,7 +228,7 @@ export class Runtime extends Service implements SourceHost {
   private httpHost(): HttpHost {
     const runtime = this
     const { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks, setup, passes } = this
-    return { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks,
+    return { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks, cluster: this.cluster,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),

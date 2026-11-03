@@ -177,6 +177,8 @@ Agents may rely on these routes and fields. The other routes in `src/app/api.ts`
 | `POST policy-sync/<source id>` | Syncs that Source's allowed list now: `policy`, the Source's part as saved |
 | `GET prompts`, `PUT prompts` with `{"config", "baseRevision"}` | Reads the prompt configuration: `current`, with its `revision` and `config`, `defaults`, `sections`, the team sections in the order Sessions read them, `skillName`, the pattern of a team skill's name, `builtin`, the names a team skill cannot take, and `skillPrefix`, which Sessions load a skill's name under. Or saves it: the new `revision` |
 | `POST tickets/<id>/retry`, `POST tickets/<id>/stop` | Retries or stops a Ticket, as the panel does |
+| `GET cluster`, `POST cluster/instances` with `{"repository": "owner/name", "name"?: "instance"}` | The multi-repository cluster that the panel's Repositories page shows: `available` and a `reason` when it is not, `instances` (each with its configuration, `running`, `panelUrl` when running, `setupProblem`, `healthErrors`, `load`, `waitingTickets` and, when the host did not answer, `unreachable`), `external`, and `operations`. The POST adds and starts one repository with `tools/cluster.mjs` (`add --provision`, or `provision` for a repository that is already configured): `operation`, with `action`, `name`/`repository`, `startedAt`, `finishedAt`, `ok` and the kept `output` |
+| `POST cluster/instances/<name>/start`, `POST cluster/instances/<name>/stop` | Starts or stops one cluster instance: `operation`, as above |
 
 Health entries are grouped by responsibility:
 

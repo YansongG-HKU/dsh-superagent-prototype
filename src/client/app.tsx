@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { SearchView } from './api.ts'
 import { Button, Dot, Icon, Input, Modal, SegmentedTabs } from './controls.tsx'
+import { ClusterPage } from './cluster.tsx'
 import type { DeploymentForm } from './deployment.tsx'
 import { EvalStatus } from './eval.tsx'
 import { ExecutionStatus } from './execution.tsx'
@@ -148,6 +149,7 @@ function Pages({ route, openTab, deploymentForm }: { route: Route; openTab: (tab
     switch (route.page) {
       case 'overview': return <OverviewPage />
       case 'source': return <SourceStatus />
+      case 'cluster': return <ClusterPage />
       case 'trigger': return route.id !== undefined ? <ThreadPage key={route.id} id={route.id} target={route.query?.trigger} />
         : <TriggerStatus filter={route.query?.filter ?? 'subscribed'} />
       case 'eval': return <EvalStatus filter={route.query?.filter ?? 'work'} window={route.query?.window}

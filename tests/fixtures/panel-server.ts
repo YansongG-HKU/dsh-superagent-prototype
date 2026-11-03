@@ -11,7 +11,7 @@ import { SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInPart, buil
 import type { DroppedReply, HistoryView, Problem, PromptsView, SetupView, SourceStatusRow, SourceView, StateView, ThreadPageView,
   ThreadRow, TicketPageView,
   TicketRow, TicketStage,
-  TriggerRow } from '../../src/client/api.ts'
+  TriggerRow, ClusterOperationView, ClusterView } from '../../src/client/api.ts'
 import { SETUP_FIELDS } from '../../src/deployment.ts'
 import { EvalConfigSchema, ExecutorConfigSchema, PolicyConfigSchema, SettingsSchema } from '../../src/policy.ts'
 import { SetupError, type SetupCode } from '../../src/setup.ts'
@@ -108,6 +108,7 @@ export interface PanelServer {
   opened: string[]
   dropped: DroppedReply[]
   failing: Extract<Problem, { kind: 'outgoing' }>['outgoing'][]
+  cluster: ClusterView
 }
 export let server: PanelServer
 
@@ -248,6 +249,15 @@ function initial(): PanelServer {
   const defaults = { revision: 0, previousRevision: null, savedAt: '', source: 'defaults' }
   return {
     health: {}, down: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
+    cluster: { available: true, tool: '/bundle/tools/cluster.mjs', configPath: '/srv/home/.dsh/superagent-cluster.json',
+      bundle: '/bundle', updatedAt: '2026-09-23T00:00:00Z', operations: [], external: [], instances: [
+        { name: 'widgets', profile: 'superagent-widgets', port: 3082, repository: 'acme/widgets', stateDir: '/srv/state/widgets',
+          clone: '/srv/clones/widgets', agentLogin: 'agent-bot', enabled: true, running: true,
+          panelUrl: 'http://127.0.0.1:3082/?token=panel-token', healthErrors: [], waitingTickets: 1,
+          load: { running: 0, queued: 0, maxWorkers: 3 } },
+        { name: 'gadgets', profile: 'superagent-gadgets', port: 3083, repository: 'acme/gadgets', stateDir: '/srv/state/gadgets',
+          clone: '/srv/clones/gadgets', agentLogin: 'agent-bot', enabled: true, running: false },
+      ] },
     setup: { machine: MACHINE, problem: null, feishuProblem: null,
       accounts: { repository: 'acme/widgets', agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
         name: 'Widgets Bot' } } },
@@ -288,6 +298,10 @@ type Route<K extends keyof Api> = { query?: readonly Query<K>[]; answer: (reques
 const page = <T>(items: T[]) => ({ items, total: items.length, next_offset: null })
 const ticketOf = (id: string) =>
   [...server.tickets.open, ...server.person, ...server.tickets.ended].find(ticket => ticket.id === id) ?? server.ticketDetails[id]
+let clusterOperationSequence = 0
+const clusterOperation = (action: ClusterOperationView['action'], info: { name?: string; repository?: string } = {}): ClusterOperationView =>
+  ({ id: `op-${++clusterOperationSequence}`, action, ...info, startedAt: '2026-09-23T00:00:00Z',
+    finishedAt: '2026-09-23T00:00:01Z', ok: true, output: ['done'] })
 const SourceSave = z.object({ enabled: z.boolean(), config: z.unknown() })
 
 const ROUTES: { [K in keyof Api]: Route<K> } = {
@@ -396,6 +410,25 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     return { parts: { orchestrator: promptParts(body, 'orchestrator', environment, policy), worker: promptParts(body, 'worker', environment) },
       skills: Object.fromEntries(skills),
       orchestrator: composePrompt(body, 'orchestrator'), worker: composePrompt(body, 'worker'), scope: '' }
+  } },
+  // The multi-repository cluster page: read the fleet, add a repository, start and stop an instance.
+  'GET cluster': { answer: () => server.cluster },
+  'POST cluster/instances': { body: true, answer: ({ body }) => {
+    const operation = clusterOperation('add', { repository: body.repository, ...body.name ? { name: body.name } : {} })
+    server.cluster = { ...server.cluster, operations: [operation, ...server.cluster.operations] }
+    return { operation }
+  } },
+  'POST cluster/instances/:name/start': { answer: ({ params }) => {
+    if (!server.cluster.instances.some(item => item.name === params.name)) return refuse(404, 'Instance not found')
+    server.cluster = { ...server.cluster, instances: server.cluster.instances.map(item => item.name === params.name
+      ? { ...item, running: true, panelUrl: `http://127.0.0.1:${item.port}/?token=panel-token` } : item) }
+    return { operation: clusterOperation('start', { name: params.name }) }
+  } },
+  'POST cluster/instances/:name/stop': { answer: ({ params }) => {
+    if (!server.cluster.instances.some(item => item.name === params.name)) return refuse(404, 'Instance not found')
+    server.cluster = { ...server.cluster, instances: server.cluster.instances.map(item => item.name === params.name
+      ? { ...item, running: false, panelUrl: undefined } : item) }
+    return { operation: clusterOperation('stop', { name: params.name }) }
   } },
 }
 

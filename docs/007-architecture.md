@@ -248,6 +248,7 @@ Each model request binds the Session to the current prompt revision. The revisio
 | `src/app/notices.ts` | Domain events and worker reports into notices and relays for the main Session |
 | `src/app/tools/main.ts`, `src/app/tools/executor.ts` | Tool arguments of the main Session and the Executor Sessions into calls of the core classes, and their results into cards |
 | `src/app/http.ts`, `src/app/views/`, `src/app/api.ts` | HTTP requests into calls, and Store reads into the panel's views; `api.ts` types every route for the panel |
+| `src/app/cluster.ts` | The panel's cluster page: reads `tools/cluster.mjs`'s configuration and instance state, probes each repository instance's management API, and runs the tool for adding, starting and stopping one |
 | `src/app/resources.ts`, `src/app/links.ts`, `src/app/cards.ts` | Resource names into reads, source messages into links, records into compact cards for models |
 | `src/sources/github*.ts`, `src/sources/feishu*.ts`, `src/sources/poll.ts` | GitHub and Feishu payloads into Triggers and Thread facts, and messages into CLI calls |
 | `src/deployment.ts`, `src/setup.ts`, `src/infra/` | Setup probes and problems, CLI transport, the agent's process environment |
@@ -343,6 +344,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/tools/main.ts` | The main Session's tools |
 | `src/app/tools/executor.ts` | An Executor Session's tools |
 | `src/app/http.ts` | The `/orchestrator/api` routes: the same-origin check, request limits and one status per kind of failure |
+| `src/app/cluster.ts` | `ClusterAdmin`: the panel's cluster page data (the `tools/cluster.mjs` configuration, each instance's probed state, external hosts, recent operations) and the add/start/stop runs of that tool |
 | `src/app/api.ts` | `Api`, every route with its parameters, query, body and response, and the filters of the lists; it imports only types, so the panel bundles it |
 | `src/app/views/text.ts` | The two forms of a view's text: `preview`, plain text on one line, and `markdown` without HTML; `plain` and `readable` |
 | `src/app/views/records.ts` | The rows the views share: Triggers, Tickets, Threads, Decisions and Channel links, and `ownersOf`, the owners of follow-ups as one request reads them |
@@ -376,6 +378,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/feishu-image.ts` | Reads a Feishu message's image as an attachment for the assessing Session |
 | `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel and the page in DeepSeek Harness's Plugin Manager |
 | `src/client/app.tsx` | The panel: header, search, glossary, tabs and the page of the current route |
+| `src/client/cluster.tsx` | The cluster page: repository instances with their status, panel links and start/stop controls, the add form, and the progress of the cluster tool's operations |
 | `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, and `restart`, which reads the state quickly while dsh-superagent restarts |
 | `src/client/api.ts` | Calls and polls of the management API, typed by `src/app/api.ts`, and the Decision filters of the Eval status |
 | `src/client/route.ts` | The tabs, the settings groups, the typed routes that `parseRoute` reads, and the route memory with the settings group opened last |
@@ -444,6 +447,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/locales.spec.ts`, `tests/styles.spec.ts` | The copy in both languages, the stylesheet |
 | `tests/class-docs.spec.ts` | Every class in `src` has a JSDoc block before it |
 | `tests/cluster.spec.ts` | The multi-repository cluster tool (`tools/cluster.mjs`): its profile template, repository/instance naming, port allocation, prepare command, Web URL detection, path expansion and host-environment scrubbing |
+| `tests/cluster-admin.spec.ts` | The host-side cluster administration behind the panel page: availability reasons, instance probing, stopped rows, and the refusals of malformed or duplicate repositories and unknown instances |
+| `tests/panel-cluster.spec.tsx` | The cluster page: repository instances with their panel links and controls, starting one, adding a repository, and the unavailable explanation |
 | `tests/docs.spec.ts` | Numbered documents link only to earlier ones, every local link resolves, no document has merge conflict markers, and this document's tables list every module and every test |
 
 `tests/fixtures/` holds what several tests share: `host.ts`, a simulated DeepSeek Harness host; `panel-server.ts` and `panel.tsx`, the fake management API and the panel around a page; `deployment.ts`, a resolved deployment; `git.ts`, the environment of every git the tests start, which names no repository; and `async.ts`.

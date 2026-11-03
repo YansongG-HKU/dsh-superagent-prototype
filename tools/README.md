@@ -11,7 +11,7 @@ contains credentials. See [../WINDOWS.md](../WINDOWS.md) for the full installati
 | `status.ps1` | Print setup, accounts, health, last day's flow and the tickets waiting for a person (exit codes 0/1/2/3). |
 | `smoke-test.mjs` | Open an Issue that mentions the agent, then follow the ticket to a person stage or its end, printing pull requests. |
 | `dev-profile.ps1` | Start/stop a dedicated-profile deployment (upstream's recommended layout) instead of the Desktop profile. |
-| `cluster.mjs` | **Multiple repositories:** one independent instance per repository from a declarative JSON config — `init`, `add`, `setup`, `start`, `stop`, `status`, `configure`, `upgrade`, `doctor`, `logs`. |
+| `cluster.mjs` | **Multiple repositories:** one independent instance per repository from a declarative JSON config — `init`, `add` (`--provision` brings a repository all the way up), `setup`, `start`, `stop`, `status`, `configure`, `provision`, `upgrade`, `doctor`, `logs`. The panel's **Repositories (cluster)** page reads the same config and runs this tool. |
 | `profile-template.yml` | Profile patch template the cluster tool renders for every instance (port, state dir, model route). |
 
 ## Multiple repositories (cluster mode)
@@ -27,7 +27,7 @@ node tools/cluster.mjs init --bundle <this checkout> --dsh-bin <dsh/lib/bin.js> 
   --state-root <dir> --clone-root <dir> [--external desktop=http://127.0.0.1:54746]
 
 # per repository
-node tools/cluster.mjs add --repo owner/name          # allocates name/profile/port/state/clone
+node tools/cluster.mjs add --repo owner/name --provision # allocates name/profile/port/state/clone and brings it up
 node tools/cluster.mjs setup                           # profiles, patches, bundle, gh config, clones
 node tools/cluster.mjs start                           # detached DSH processes, prints panel URLs
 node tools/cluster.mjs configure                       # Source/Policy/Executor/Prompts per instance
