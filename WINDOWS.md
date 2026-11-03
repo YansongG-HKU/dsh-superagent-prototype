@@ -128,6 +128,59 @@ exit $LASTEXITCODE
 `status.ps1` (health/setup/ticket overview) and `smoke-test.mjs` (end-to-end: open an issue, watch the flow,
 report the PR).
 
+## Multiple repositories (cluster mode)
+
+The prototype serves **one repository per plugin instance** on purpose: every GitHub API call a Source makes is
+restricted to its configured repository, thread identities are per repository, and the ticket's prepare
+command, branch, pull request and delivery all belong to that repository. Watching several repositories
+therefore means running several isolated instances, and `tools/cluster.mjs` manages that fleet from one
+declarative file (`~/.dsh/superagent-cluster.json`).
+
+Each instance is a normal dsh-superagent deployment with its own:
+
+- DSH profile (created from the shipped Web template, patched by the cluster tool),
+- DSH process and port, so a crash, restart or upgrade of one repository cannot affect another,
+- state directory (database, worker shims, agent git configuration, ticket directories) — the SQLite lock
+  requires distinct directories,
+- `gh` configuration directory (`<stateDir>\gh-agent`), so one agent account can serve every repository while
+  each instance keeps its own identity boundary,
+- panel, Policy allow-list and prompts; the agent shows what each repository needs like a separate teammate.
+
+Quick start (Windows; a plain terminal, not a DSH Session, so no inherited worker environment):
+
+```powershell
+cd <this checkout>
+node tools/cluster.mjs init --bundle <this checkout> --dsh-bin <dsh>/lib/bin.js --node <node.exe> `
+  --pnpm <pnpm.mjs> --agent-login <agent> --operator-login <you> --agent-cli <gh.exe> `
+  --state-root <dir> --clone-root <dir> --external desktop=http://127.0.0.1:54746
+node tools/cluster.mjs add --repo owner/first-repo
+node tools/cluster.mjs add --repo owner/second-repo
+node tools/cluster.mjs setup
+node tools/cluster.mjs start
+node tools/cluster.mjs configure
+node tools/cluster.mjs status
+```
+
+- `setup` creates each profile from the Web template, renders `tools/profile-template.yml` (port, state
+  directory and model route), installs this bundle with `dsh plugin add link:<checkout>`, writes the agent's
+  isolated `gh` configuration and clones the repository for ticket worktrees.
+- `start` spawns `dsh --profile <profile>` detached and prints each panel URL (with its access token).
+- `configure` calls each instance's management API with its repository, allow-list, prepare command and prompt.
+- `stop` stops an instance and clears a stale state lock; `upgrade` rebuilds the bundle once and restarts every
+  running instance; `doctor` checks paths, the agent identity, push access and free ports; `logs --name <n>`
+  tails one instance.
+- A hosted DSH Desktop instance cannot be started or stopped by the tool, but it can be registered as an
+  `external` entry so `status` covers it in the same view.
+
+Practical limits: every instance is a full DSH runtime (a few hundred MB of memory), and GitHub rate limits are
+per agent account — the Source polls the repository's notifications and event streams about once a minute, so a
+handful of repositories is comfortable, dozens are not. Instances that use the same agent account need that
+account to be a collaborator on each repository. For per-repository teams or separate credentials, give an
+instance its own `--agent-login`/`--agent-cli` in `add`.
+
+Background start/stop on Windows is not a Windows Service: after a reboot, run `cluster start` again (or register
+a scheduled task that runs it at logon).
+
 ## How it behaves inside the DSH Desktop app
 
 The plugin runs inside the desktop app's Node process, exactly like any other profile plugin. The prototype's

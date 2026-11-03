@@ -1,0 +1,27 @@
+# Profile patch template rendered by tools/cluster.mjs for every cluster instance.
+# The renderer fills the port, stateDir and desktopPlatform placeholders.
+# The model section mirrors the DSH Desktop account login; adjust it to your provider if needed.
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: {{port}}
+# Use the DeepSeek account sign-in the DSH Desktop app already has (win32/darwin only).
+- id: deepseek-account
+  config:
+    desktopPlatform: {{desktopPlatform}}
+- id: llm-deepseek-account
+  disabled: false
+# Fallback provider route: `oc-go` with an OpenCode Go key stored in this DSH home.
+- id: llm-pi-ai
+  config:
+    providers:
+      opencode-go:
+        apiKeyEnv: OPENCODE_GO_API_KEY
+- id: agent-default-model
+  config:
+    provider: deepseek-account
+    model: deepseek-flash
+    reasoningEffort: max
+- id: dsh-superagent
+  config:
+    stateDir: '{{stateDir}}'

@@ -24,3 +24,14 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      # The cluster tool creates profiles and starts instances only when its commands run; this
+      # checks its config/template/argument surface without touching a DSH home.
+      - name: Cluster tool self-check
+        shell: bash
+        run: |
+          node tools/cluster.mjs help
+          config="${{ runner.temp }}/cluster-self-check.json"
+          node tools/cluster.mjs init --bundle . --dsh-bin ./lib/index.js --node node --pnpm pnpm \
+            --agent-login agent --operator-login operator --agent-cli gh --config "$config"
+          node tools/cluster.mjs add --repo acme/widgets --config "$config"
+          node tools/cluster.mjs list --config "$config"

@@ -5,12 +5,13 @@
  *   node tools/configure.mjs --url http://127.0.0.1:54746 \
  *     --repo owner/name --cli "C:\path\to\gh.exe" \
  *     --agent-login agent-account --operator-login operator-account \
- *     --clone "C:\path\to\local-clone"
+ *     --clone "C:\path\to\local-clone" [--prepare-file <ps1>]
  *
  * Idempotent: it reads the current settings, then saves the GitHub Source, the Policy, the
  * Executor (PowerShell prepare command) and the Delivery requirements prompt text.
  * The management API requires loopback hostnames and the `x-orchestrator-request` header.
  */
+import { readFileSync } from 'node:fs'
 import process from 'node:process'
 
 const args = process.argv.slice(2)
@@ -25,7 +26,7 @@ const agentLogin = opt('agent-login', '')
 const operatorLogin = opt('operator-login', '')
 const clone = opt('clone', '')
 if (!repo || !cli || !agentLogin || !operatorLogin || !clone) {
-  console.error('usage: node tools/configure.mjs --url <url> --repo owner/name --cli <gh.exe> --agent-login <login> --operator-login <login> --clone <path>')
+  console.error('usage: node tools/configure.mjs --url <url> --repo owner/name --cli <gh.exe> --agent-login <login> --operator-login <login> --clone <path> [--prepare-file <ps1>]')
   process.exit(2)
 }
 
@@ -76,7 +77,7 @@ const delivery = [
   'Closing the PR ends the ticket; send no other message.',
 ].join('\n')
 
-const prepare = [
+const generatedPrepare = [
   '$ErrorActionPreference = \'Stop\'',
   `$repo = '${clone.replaceAll("'", "''")}'`,
   '$ref = if ($env:DSH_SUPERAGENT_GITHUB_PR_HEAD) { $env:DSH_SUPERAGENT_GITHUB_PR_HEAD } else { \'HEAD\' }',
@@ -86,6 +87,9 @@ const prepare = [
   'git -C $repo worktree add -b "agent/$env:DSH_SUPERAGENT_NAME" "$env:DSH_SUPERAGENT_DIR" "refs/dsh-superagent/$env:DSH_SUPERAGENT_TICKET"',
   'exit $LASTEXITCODE',
 ].join('\n')
+const prepareFile = opt('prepare-file', '')
+// A custom prepare command may come inline (the cluster tool stores it in its config) or from a file.
+const prepare = opt('prepare', '') || (prepareFile ? readFileSync(prepareFile, 'utf8').trim() : generatedPrepare)
 
 async function main() {
   const settings = await callWhileStarting('settings', 'GET', 'settings')

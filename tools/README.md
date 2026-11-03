@@ -11,3 +11,30 @@ contains credentials. See [../WINDOWS.md](../WINDOWS.md) for the full installati
 | `status.ps1` | Print setup, accounts, health, last day's flow and the tickets waiting for a person (exit codes 0/1/2/3). |
 | `smoke-test.mjs` | Open an Issue that mentions the agent, then follow the ticket to a person stage or its end, printing pull requests. |
 | `dev-profile.ps1` | Start/stop a dedicated-profile deployment (upstream's recommended layout) instead of the Desktop profile. |
+| `cluster.mjs` | **Multiple repositories:** one independent instance per repository from a declarative JSON config — `init`, `add`, `setup`, `start`, `stop`, `status`, `configure`, `upgrade`, `doctor`, `logs`. |
+| `profile-template.yml` | Profile patch template the cluster tool renders for every instance (port, state dir, model route). |
+
+## Multiple repositories (cluster mode)
+
+The prototype serves one repository per instance, so several repositories are several isolated
+instances: one DSH profile, process, port, state directory, `gh` configuration and panel each.
+`cluster.mjs` keeps that fleet in one file (`~/.dsh/superagent-cluster.json`).
+
+```powershell
+# one time: describe the machine and the shared agent account
+node tools/cluster.mjs init --bundle <this checkout> --dsh-bin <dsh/lib/bin.js> --node <node.exe> `
+  --pnpm <pnpm.mjs> --agent-login <agent> --operator-login <you> --agent-cli <gh.exe> `
+  --state-root <dir> --clone-root <dir> [--external desktop=http://127.0.0.1:54746]
+
+# per repository
+node tools/cluster.mjs add --repo owner/name          # allocates name/profile/port/state/clone
+node tools/cluster.mjs setup                           # profiles, patches, bundle, gh config, clones
+node tools/cluster.mjs start                           # detached DSH processes, prints panel URLs
+node tools/cluster.mjs configure                       # Source/Policy/Executor/Prompts per instance
+node tools/cluster.mjs status                          # setup, health, executor load per instance
+```
+
+`--name <instance>` limits setup/start/stop/configure to one instance; `upgrade` rebuilds the
+bundle once and restarts the running instances; `doctor` checks paths, identity, push access and
+free ports. A hosted DSH Desktop instance can be listed as `--external` so `status` covers it too.
+

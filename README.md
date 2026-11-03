@@ -4,7 +4,9 @@
 
 > **Windows port.** This fork runs the prototype on **Windows**, including inside the DeepSeek Harness **Desktop app**:
 > host environment, `gh` identity isolation, git credential helper, PowerShell ticket preparation, Session presets,
-> tests and an optional in-app deployment are adapted. Start at [WINDOWS.md](WINDOWS.md) for the Windows
+> tests and an optional in-app deployment are adapted. It also ships **cluster mode** for watching **several
+> repositories**: one isolated instance per repository from a declarative config (`tools/cluster.mjs`, see
+> [WINDOWS.md](WINDOWS.md#multiple-repositories-cluster-mode)). Start at [WINDOWS.md](WINDOWS.md) for the Windows
 > installation, the exact upstream changes and the known limitations; `tools/` contains the installer and
 > configuration helpers. Everything below is the upstream documentation and still applies.
 
