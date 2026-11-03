@@ -24,9 +24,11 @@ describe('account-isolated operations', () => {
   it('runs every command with its environment over the process environment, where undefined removes a variable', async () => {
     process.env.GH_TOKEN = 'personal'
     try {
-      const output = await new Commands(() => deployment, { GH_TOKEN: undefined, DSH_SUPERAGENT_PROBE: 'agent' }, new AbortController().signal).run('env', [])
-      expect(output).toContain('DSH_SUPERAGENT_PROBE=agent')
-      expect(output).not.toContain('GH_TOKEN=')
+      const output = await new Commands(() => deployment, { GH_TOKEN: undefined, DSH_SUPERAGENT_PROBE: 'agent' }, new AbortController().signal)
+        .run(process.execPath, ['-e', 'console.log(JSON.stringify(process.env))'])
+      const environment = JSON.parse(output) as Record<string, string>
+      expect(environment.DSH_SUPERAGENT_PROBE).toBe('agent')
+      expect(environment).not.toHaveProperty('GH_TOKEN')
     } finally { delete process.env.GH_TOKEN }
   })
   it('refuses Feishu commands when the deployment has no Feishu bot', async () => {
@@ -169,7 +171,8 @@ it('says how to add the bot to a chat when Feishu answers that it is not a membe
   run.mockResolvedValueOnce(JSON.stringify({ ok: false, error: { code: 232011, message: 'operator is not in the chat' } }))
   await expect(commands.lark(['im', '+chat-members-list'])).rejects.toMatchObject({ message: hint, code: 232011 })
 })
-it('names only the program and how it ended when a command prints no diagnostics, never its arguments', async () => {
+/** `sh -c kill -9 $$` is POSIX process semantics. */
+it.skipIf(process.platform === 'win32')('names only the program and how it ended when a command prints no diagnostics, never its arguments', async () => {
   const commands = new Commands(() => deployment, {}, new AbortController().signal)
   const secret = 'secret reply text'
   await expect(commands.run('sh', ['-c', 'exit 3', secret])).rejects.toMatchObject({ message: 'sh exited with code 3', exitCode: 3 })
@@ -191,7 +194,9 @@ it('reports failures as CliError with the code the CLI names and the exit status
   const aborted = Object.assign(new Error('The operation was aborted'), { name: 'AbortError', stderr: '' })
   expect(commandError(aborted)).toBe(aborted)
   const controller = new AbortController()
-  const running = new Commands(() => deployment, {}, controller.signal).run('sleep', ['5'])
+  // A Node child that sleeps five seconds stands in for any long command, on every platform.
+  const sleep = (): [string, string[]] => [process.execPath, ['-e', 'setTimeout(() => {}, 5000)']]
+  const running = new Commands(() => deployment, {}, controller.signal).run(...sleep())
   controller.abort()
   await expect(running).rejects.toMatchObject({ name: 'AbortError' })
   const commands = new Commands(() => deployment, {}, new AbortController().signal)
@@ -203,12 +208,13 @@ it('stops a running command when the signal of its work aborts, or the lifetime,
   const lifetime = new AbortController(), work = new AbortController()
   const commands = new Commands(() => deployment, {}, lifetime.signal)
   const started = Date.now()
-  const running = commands.withSignal(work.signal).run('sleep', ['5'])
+  const sleep = (): [string, string[]] => [process.execPath, ['-e', 'setTimeout(() => {}, 5000)']]
+  const running = commands.withSignal(work.signal).run(...sleep())
   work.abort()
   await expect(running).rejects.toThrow()
   // Only commands bound to the aborted work signal stop.
-  expect(await commands.run('echo', ['still'])).toBe('still\n')
-  const other = commands.withSignal(new AbortController().signal).run('sleep', ['5'])
+  expect(await commands.run(process.execPath, ['-e', 'console.log("still")'])).toBe('still\n')
+  const other = commands.withSignal(new AbortController().signal).run(...sleep())
   lifetime.abort()
   await expect(other).rejects.toThrow()
   expect(Date.now() - started).toBeLessThan(4000)

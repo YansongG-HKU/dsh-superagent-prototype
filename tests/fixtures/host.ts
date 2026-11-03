@@ -20,6 +20,16 @@ import { testMachine } from './deployment.ts'
 
 export const MEMBER = 'ou_alice'
 export const CHAT = 'oc_team'
+/** The extension a stand-in CLI needs on Windows, where an absolute path is only executable with one. */
+export const CLI_EXTENSION = process.platform === 'win32' ? '.cmd' : ''
+/** The program and arguments DSH runs a ticket's prepare command with: the platform shell. */
+export const prepareSpawn = (command: string): string[] => process.platform === 'win32'
+  ? ['pwsh', '-NoProfile', '-NonInteractive', '-Command', command]
+  : ['sh', '-c', command]
+/** True when a subprocess spawn request runs a ticket prepare command, whichever shell this platform uses. */
+export const isPrepareSpawn = (argv: readonly string[]): boolean => argv[0] === prepareSpawn('')[0]
+/** The canned-answer key tests give a prepare command; their answers keep the POSIX `sh -c <command>` spelling on every platform. */
+export const prepareAnswerKey = (argv: readonly string[]): string => `sh -c ${argv.at(-1) ?? ''}`
 
 /** Build a Feishu mention trigger from Alice in `oc_team`, using the digits in `id` as the timestamp offset in seconds. */
 export function feishu(id: string, text: string, overrides: Record<string, unknown> = {}): Trigger {
@@ -134,7 +144,7 @@ export function subagentRuntime(agents: Map<string, FakeAgent>) {
 /** @param seed - writes to the database before the Runtime opens it, such as records an earlier version stored. */
 export async function startRuntime(seed?: (store: Store) => void) {
   const directory = mkdtempSync(join(tmpdir(), 'orchestrator-host-'))
-  const AGENT = join(directory, 'agent-gh'), BOT = join(directory, 'lark-bot')
+  const AGENT = join(directory, `agent-gh${CLI_EXTENSION}`), BOT = join(directory, `lark-bot${CLI_EXTENSION}`)
   const repository = { default_branch: 'master', permissions: { push: true } }
   vi.spyOn(Commands.prototype, 'gh').mockImplementation(async args => args[1] === 'user' ? { login: 'agent-bot' } : repository)
   vi.spyOn(Commands.prototype, 'lark').mockResolvedValue({ users: [{ member_id: MEMBER, name: 'Alice' }], has_more: false })
@@ -150,15 +160,16 @@ export async function startRuntime(seed?: (store: Store) => void) {
     ['git config -z --show-origin --get-all credential.https://github.com.helper']: `file:${workerGitConfig(directory)}\0${credentialHelper(AGENT)}\0`,
     [scoped]: `global\0credential.helper\n\0global\0credential.https://github.com.helper\n${credentialHelper(AGENT)}\0`,
   }
-  /** A prepare command (`sh -c`) waits for this while it is set. */
+  /** A prepare command waits for this while it is set. */
   const hooks: { prepare?: Promise<void> } = {}
   const subprocess = { spawn: vi.fn((spec: { argv: readonly string[] }) => {
     const argv = [...spec.argv]
     while (argv[0] === 'env' || /^[A-Z_]+=/.test(argv[0] ?? '')) argv.shift()
+    const prepare = isPrepareSpawn(argv)
     const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
     const exited = { exitCode: 0, signal: null }
-    const done = argv[0] === 'sh' && hooks.prepare ? hooks.prepare.then(() => exited) : Promise.resolve(exited)
-    return { done, collected: { stdout: reader(answers[argv.join(' ')] ?? ''), stderr: reader('') } }
+    const done = prepare && hooks.prepare ? hooks.prepare.then(() => exited) : Promise.resolve(exited)
+    return { done, collected: { stdout: reader(answers[prepare ? prepareAnswerKey(argv) : argv.join(' ')] ?? ''), stderr: reader('') } }
   }) }
   const agents = new Map<string, FakeAgent>()
   /** Each Session's next step, which takes the messages that wait for one. */

@@ -1,16 +1,22 @@
 /** Plugin configuration and startup verification for repository access and agent CLI identities. */
 import { LIMITS } from './limits.ts'
 import { accessSync, constants, statSync } from 'node:fs'
-import { delimiter, isAbsolute, join } from 'node:path'
+import { delimiter, extname, isAbsolute, join } from 'node:path'
 import type { Volatile } from '@deepseek-ai/cordis'
 import s from '@deepseek-ai/schemastery'
 import { z } from 'zod'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
-import { runAsWorker, sameDirectory, withoutDirectory, workerBin } from './infra/environment.ts'
+import { runAsWorker, sameDirectory, withoutDirectory, agentGhConfig, workerBin } from './infra/environment.ts'
 import { SetupError } from './setup.ts'
 
+/** True on the Windows host this plugin runs on, where command names resolve through PATHEXT instead of an executable bit. */
+const WINDOWS = process.platform === 'win32'
+/** Executable extensions Windows appends to a command name, in the order Windows tries them. */
+const PATHEXT = ['.exe', '.cmd', '.bat', '.com']
+/** A POSIX, Windows drive-absolute, or UNC absolute path. */
+const ABSOLUTE = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/
 const reason = (error: unknown): string => error instanceof Error ? error.message : String(error)
-const absolute = (description: string) => s.string().pattern(/^\//).description(`${description} Absolute path.`)
+const absolute = (description: string) => s.string().pattern(ABSOLUTE).description(`${description} Absolute path.`)
 /** Plugin configuration of the dsh-superagent entry. Volatile fields apply without a restart because dsh-superagent reads them on each use; changing `stateDir` remounts the plugin. */
 export const Config = s.object({
   stateDir: absolute('Directory for the database, locks, worker shims, the agent\'s git configuration and, by default, the ticket directories.').required(),
@@ -57,22 +63,48 @@ export interface Deployment extends Machine {
 }
 export interface FeishuBot { cli: string; appId: string; brand: 'feishu' | 'lark'; botId: string; name: string }
 
+/** True when `file` is a regular executable file: a Windows executable extension on Windows, any executable file on POSIX. */
+function executableFile(file: string): boolean {
+  try {
+    if (!statSync(file).isFile()) return false
+    if (WINDOWS) return PATHEXT.includes(extname(file).toLowerCase())
+    accessSync(file, constants.X_OK)
+    return true
+  } catch { return false /* Not an executable file here; try the next candidate. */ }
+}
+/** Candidate files a command name resolves to on Windows: the name itself when it already carries an executable extension, else each PATHEXT candidate. */
+function windowsCandidates(base: string): string[] {
+  return PATHEXT.some(extension => base.toLowerCase().endsWith(extension)) ? [base] : PATHEXT.map(extension => base + extension)
+}
 /** Resolve a command name or absolute path to an executable file, ignoring the worker shim directory. */
 export function executable(name: string, path: string, exclude?: string): string {
-  if (name.includes('/') && !isAbsolute(name)) throw new Error(`${name} must be a command name or an absolute path`)
-  const candidates = isAbsolute(name) ? [name] : path.split(delimiter).filter(dir => isAbsolute(dir) && !(exclude && sameDirectory(dir, exclude))).map(dir => join(dir, name))
-  for (const candidate of candidates) {
-    try { if (statSync(candidate).isFile()) { accessSync(candidate, constants.X_OK); return candidate } }
-    catch { /* Not an executable file here; try the next PATH directory. */ }
+  const separated = WINDOWS ? name.includes('/') || name.includes('\\') : name.includes('/')
+  if (separated && !isAbsolute(name)) throw new Error(`${name} must be a command name or an absolute path`)
+  if (isAbsolute(name)) {
+    if (executableFile(name)) return name
+    throw new Error(`${name} is not an executable file`)
   }
-  throw new Error(`${name} is not an executable file${isAbsolute(name) ? '' : ' on PATH'}`)
+  const dirs = path.split(delimiter).filter(dir => isAbsolute(dir) && !(exclude && sameDirectory(dir, exclude)))
+  for (const dir of dirs) {
+    for (const candidate of WINDOWS ? windowsCandidates(join(dir, name)) : [join(dir, name)]) if (executableFile(candidate)) return candidate
+  }
+  throw new Error(`${name} is not an executable file on PATH`)
 }
 
-export type Probe = (argv: string[]) => Promise<string>
-/** Run startup checks through DSH's worker subprocess service with worker shims removed from PATH so a `gh` wrapper script reaches the real binary. */
+export type Probe = (argv: string[], env?: Record<string, string>) => Promise<string>
+/**
+ * Run startup checks through DSH's worker subprocess service with worker shims removed from PATH so a `gh` wrapper script reaches the real
+ * binary. POSIX passes the variables through `env`; Windows has no `env` command, so the subprocess spawn's explicit environment carries
+ * them instead (it merges after the service's credential scrub). On Windows the probe must also see `GH_CONFIG_DIR`, because the account
+ * identity comes from that isolated gh configuration rather than from the probed program's path: without it, setup would verify the
+ * operator's own signed-in account instead of the agent's.
+ */
 export function workerProbe(subprocess: SubprocessRuntime, stateDir: string, cwd: string, signal: AbortSignal): Probe {
   const path = withoutDirectory(process.env.PATH ?? '', workerBin(stateDir))
-  return argv => runAsWorker(subprocess, ['env', `PATH=${path}`, ...argv], cwd, AbortSignal.any([signal, AbortSignal.timeout(60_000)]))
+  const deadline = (): AbortSignal => AbortSignal.any([signal, AbortSignal.timeout(60_000)])
+  return (argv, env) => WINDOWS
+    ? runAsWorker(subprocess, argv, cwd, deadline(), { PATH: path, GH_CONFIG_DIR: agentGhConfig(stateDir), ...env })
+    : runAsWorker(subprocess, ['env', `PATH=${path}`, ...Object.entries(env ?? {}).map(([name, value]) => `${name}=${value}`), ...argv], cwd, deadline())
 }
 
 const GithubUser = z.object({ login: z.string().regex(/^[A-Za-z0-9-]+$/), id: z.number().int().positive() })
@@ -107,6 +139,8 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
 
 const AuthStatus = z.object({ appId: z.string().regex(/^cli_[A-Za-z0-9]+$/), brand: z.enum(['feishu', 'lark']).default('feishu'), identities: z.object({ bot: z.object({ status: z.string() }) }) })
 const BotInfo = z.object({ bot: z.object({ open_id: z.string().regex(/^ou_[A-Za-z0-9]+$/), app_name: z.string().default('') }) })
+/** Variables the lark-cli probes run with: no update or skills notices, which would corrupt their output. */
+const LARK_VARIABLES: Record<string, string> = { LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' }
 /**
  * Verify that the configured Feishu CLI is authenticated as a bot and restricted to strict mode `bot`.
  * Workers invoke this CLI as `lark-cli`, so a CLI that also permits a user identity would let workers act as that user.
@@ -117,7 +151,7 @@ export async function resolveFeishuBot(machine: Machine, feishu: unknown, probe:
   const fail = (error: unknown): never => { throw error instanceof SetupError ? error : new SetupError('feishuCliFailed', { output: reason(error) }) }
   let cli = ''
   try { cli = executable(name, path, workerBin(machine.stateDir)) } catch (error) { fail(error) }
-  const run = (...args: string[]): Promise<string> => probe(['env', 'LARKSUITE_CLI_NO_UPDATE_NOTIFIER=1', 'LARKSUITE_CLI_NO_SKILLS_NOTIFIER=1', cli, ...args]).catch(fail)
+  const run = (...args: string[]): Promise<string> => probe([cli, ...args], LARK_VARIABLES).catch(fail)
   const text = await run('auth', 'status')
   const status = parsed(AuthStatus, text.slice(text.indexOf('{')))
   if (!status) return fail(new SetupError('feishuNoApp'))

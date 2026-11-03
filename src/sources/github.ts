@@ -284,25 +284,40 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
   await pollTicketPulls(ctx, signal, round)
   await pollThreads(ctx, signal, round)
   if ('error' in notified) throw notified.error
-  const { count, interval } = notified.value
+  const { count, interval, unavailable } = notified.value
   if (signal?.aborted) return interval
   if (round.failures.length) throw new Error(`${round.failures.length} GitHub reads failed: ${round.failures.slice(0, 3).join('; ')}`)
   const named = (numbers: number[]) => [...new Set(numbers)].sort((a, b) => a - b).map(number => `#${number}`).join(', ')
   const dropped = (round.dropped.length ? `; deleted on GitHub: ${named(round.dropped)}` : '')
     + (round.abandoned.length ? `; dropped after their reads kept failing: ${named(round.abandoned)}` : '')
     + (round.tally.skipped ? `; ${round.tally.skipped} unreadable items skipped` : '')
-  ctx.report('github', { state: 'ready', detail: `${count} notifications; next poll ≥ ${interval}s${dropped}`, at: round.started })
+  ctx.report('github', { state: 'ready', detail: `${count} notifications${unavailable ? ` (${unavailable})` : ''}; next poll ≥ ${interval}s${dropped}`, at: round.started })
   return interval
 }
+/**
+ * True when a GitHub CLI failure says the notifications API is not permitted for this token: GitHub requires the
+ * `notifications` OAuth scope for `GET /notifications`, and a `gh` token created without it cannot read mentions that way.
+ * Such a deployment can still receive explicit requests through the repository event streams (`observeIssues`,
+ * `observeComments`), so the failure is reported in the source's health detail instead of failing every poll.
+ */
+const notificationsUnavailable = (error: unknown): boolean =>
+  error instanceof CliError && /notifications?\s+scope|"notifications" scope/i.test(error.message)
 /** Reads notifications since the cursor and each Issue or PR they name, advancing the cursor atomically with the retry map for failed reads; deleted (410) Issues are dropped once their error is recorded. */
-async function pollNotifications(ctx: SourceContext, round: Round): Promise<{ count: number; interval: number }> {
+async function pollNotifications(ctx: SourceContext, round: Round): Promise<{ count: number; interval: number; unavailable?: string }> {
   const { state } = ctx
   const commands = ctx.commands.withSignal(round.signal)
   const since = state.get(KV.github.since) ?? round.started
   if (state.get(KV.github.since) === undefined) state.set(KV.github.since, since)
   const { repository } = ctx.deployment
   const path = `notifications?all=true&per_page=50&since=${encodeURIComponent(since)}`
-  const raw = await commands.api(path, '--include')
+  let raw: string
+  try { raw = await commands.api(path, '--include') }
+  catch (error) {
+    if (!notificationsUnavailable(error)) throw error
+    // Poll at the configured interval: the response's x-poll-interval header is unavailable on this path.
+    const interval = Math.max(60, ctx.config<GithubConfig>(SOURCE)?.pollSeconds ?? 60)
+    return { count: 0, interval, unavailable: 'the gh token needs the "notifications" scope; repository observation is in use' }
+  }
   const split = raw.search(/\r?\n\r?\n/)
   if (split < 0) throw new Error('GitHub returned no HTTP headers')
   const headers = raw.slice(0, split)
