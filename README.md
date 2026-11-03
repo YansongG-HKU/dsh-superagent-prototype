@@ -1,5 +1,7 @@
 # dsh-superagent
 
+[![check](https://github.com/YansongG-HKU/dsh-superagent-windows/actions/workflows/ci.yml/badge.svg?branch=windows-port)](https://github.com/YansongG-HKU/dsh-superagent-windows/actions/workflows/ci.yml)
+
 > **Windows port.** This fork runs the prototype on **Windows**, including inside the DeepSeek Harness **Desktop app**:
 > host environment, `gh` identity isolation, git credential helper, PowerShell ticket preparation, Session presets,
 > tests and an optional in-app deployment are adapted. Start at [WINDOWS.md](WINDOWS.md) for the Windows
