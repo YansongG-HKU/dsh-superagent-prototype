@@ -112,7 +112,13 @@ const THREAD_DECISIONS = 5
 const triggerLine = (trigger: Trigger) => ({ trigger_id: trigger.id, actor: trigger.actor.id, human: trigger.human, at: trigger.at,
   preview: preview(trigger.text), chars: trigger.text.length, read: `trigger/${trigger.id}` })
 async function transcript(host: ResourceHost, ticketId: string) {
-  return (await host.context.sessionController.inspect(workerSessionId(ticketId) as SessionId)).events
+  // DSH 0.2.2 removed SessionController.inspect(); read a passive event page instead.
+  const controller = host.context.sessionController as unknown as {
+    events: (request: { address: { kind: 'session'; sessionId: string }; maxMessages?: number }, signal: AbortSignal) =>
+      Promise<{ records: readonly { type: string; event: unknown }[] }>
+  }
+  const page = await controller.events({ address: { kind: 'session', sessionId: workerSessionId(ticketId) }, maxMessages: 1000 }, new AbortController().signal)
+  return page.records.filter(record => record.type === 'event').map(record => record.event)
 }
 
 const ROUTES: readonly Route[] = [
